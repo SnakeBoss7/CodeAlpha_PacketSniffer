@@ -2,18 +2,58 @@ from scapy.all import sniff, wrpcap
 from datetime import datetime
 import argparse
 from collections import defaultdict
-
+import socket
 # proto counter
 proto_count = defaultdict(int)
+
 # ip counter
 src_counter = defaultdict(int)
 dst_counter = defaultdict(int)
+
 # Column widths
 W_TIME  = 20
 W_PROTO = 6
 W_IP    = 45
-W_PORTS = 16
+W_PORTS = 24
+W_DIR = 10
 
+#port mapping 
+port_map = {
+    80:"HTTP",
+    443:"HTTPS",
+    21:"FTP",
+    22:"SSH",
+    23:"Telnet",
+    25:"SMTP",
+    110:"POP3",
+    53:"DNS",
+    445:"SMB",
+    3389:"RDP",
+}
+
+#get ipv4 and ipv6  address 
+def get_ipv4():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # doesn't actually send data
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
+def get_ipv6():
+    try:
+        s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        s.connect(("2001:4860:4860::8888", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return None
+
+    
+    
 def snifferUi():
     print("================================================")
     print("Starting sniffer")
@@ -31,6 +71,7 @@ def snifferUi():
         f"{'SRC_IP':<{W_IP}}"
         f"{'DST_IP':<{W_IP}}"
         f"{'PORTS':<{W_PORTS}}"
+        f"{'DIRECTION':<{W_DIR}}"
     )
     SEP = "─" * len(HDR)
     print(SEP)
@@ -53,6 +94,8 @@ def networkSniffingSummary():
 
 def packetAnalysis(packet):
     # print(packet.show())
+    sport = None
+    dport = None
     now   = str(datetime.now().time())
     proto = "-"
     src   = "-"
@@ -60,13 +103,16 @@ def packetAnalysis(packet):
     ports = "-"
 
     # Protocol
+    
+    # print(f"{packet.show()} data")
+
+    ## TRANSPORT LAYER
     if packet.haslayer("TCP"):
         proto = "TCP"
         proto_count["TCP"]+=1
         try:
             sport = int(packet["TCP"].sport)
             dport = int(packet["TCP"].dport)
-            ports = f"{sport}->{dport}"
         except Exception:
             ports = "-"
     elif packet.haslayer("UDP"):
@@ -79,7 +125,7 @@ def packetAnalysis(packet):
         try:
             sport = int(packet["UDP"].sport)
             dport = int(packet["UDP"].dport)
-            ports = f"{sport}->{dport}"
+
         except Exception:
             ports = "-"
     elif packet.haslayer("ICMP"):
@@ -88,12 +134,17 @@ def packetAnalysis(packet):
         try:
             sport = int(packet["ICMP"].sport)
             dport = int(packet["ICMP"].dport)
-            ports = f"{sport}->{dport}"
         except Exception:
             ports = "-"
 
+    if sport in port_map:
+        sport = f"{port_map[sport]}({sport})"
+    if dport in port_map:
+        dport = f"{port_map[dport]}({dport})"
+    ports = f"{sport} -> {dport}"
 
     # IPv6
+    ## NETWORK LAYER
     if packet.haslayer("IPv6"):
         src = str(packet["IPv6"].src)
         src_counter[src]+=1
@@ -115,13 +166,22 @@ def packetAnalysis(packet):
         proto="ARP"
         proto_count["ARP"]+=1
 
-
+    if src == get_ipv4() or src == get_ipv6():
+        direction = "OUTBOUND"
+    elif dst == get_ipv4() or dst == get_ipv6():
+        direction = "INBOUND"
+    elif src == dst:
+        direction = "LOCAL"
+    else:
+        direction="EXTERNAL"
+        
     print(
         f"{now:<{W_TIME}}"
         f"{proto:<{W_PROTO}}"
         f"{src:<{W_IP}}"
         f"{dst:<{W_IP}}"
         f"{ports:<{W_PORTS}}"
+        f"{direction:<{W_DIR}}"
     )
 
 def startSniffing(iface,pack_count,output,BPFfilter,summary):
